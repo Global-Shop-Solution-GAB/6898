@@ -1,0 +1,424 @@
+﻿Program.Sub.Preflight.Start
+V.Global.sError.Declare(String)
+V.Global.sErrorMessage.Declare(String)
+V.Global.sMessage.Declare(String)
+
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Author: Arturo Almaguer
+'Date: 9/12/22
+'Customer: Advanced Group Systems Eng, quote number 13758
+'This program process an excel spreadsheet and updates part numbers data. 
+'This script is launched off a new custom menu item under Inventory - File - Mass Inventory Update Excel [6898]
+
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+
+F.Intrinsic.Control.Try
+
+	F.Intrinsic.Control.CallSub("OpenFileDialog")
+	F.Intrinsic.Control.CallSub("UpdatePart")
+	F.Intrinsic.Control.CallSub("Unload")
+
+F.Intrinsic.Control.Catch
+	
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.OpenFileDialog.Start
+'This subroutine presents the user with a dialog form to select the file they want to process
+
+F.Intrinsic.Control.Try
+
+	V.Local.sFilePath.Declare(String)
+	
+	F.Intrinsic.UI.ShowOpenFileDialog("", "", "", V.Local.sFilePath)
+	F.Intrinsic.Control.If(V.Local.sFilePath.IsNotCancel)
+		
+		'Processing file
+		F.Intrinsic.Control.CallSub("ProcessFile", "FilePath", V.Local.sFilePath)
+		
+	F.Intrinsic.Control.Else
+		
+		'Displaying error message
+		F.Intrinsic.UI.Msgbox("A file must be selected to process. Ending program.", "ERROR")
+		F.Intrinsic.Control.CallSub("Unload")
+		
+	F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+
+F.Intrinsic.Control.EndTry
+Program.Sub.OpenFileDialog.End
+
+Program.Sub.ProcessFile.Start
+'This subroutine reads the excel spreadsheet and add all necessary columns.
+
+F.Intrinsic.Control.Try
+
+	V.Local.sExcelString.Declare(String)
+	V.Local.bExcel.Declare(Boolean)
+	
+	F.Automation.MSExcel.CheckPresence(V.Local.bExcel)
+	F.Intrinsic.Control.If(V.Local.bExcel, =, True) 
+		
+		'Reading the spreadsheet and creating dt from it.
+		F.Automation.MSExcel.ReadSpreadsheet(V.Args.FilePath,"","", V.Local.sExcelString)
+	
+		'Getting rid of the line in which the excel headers are stored.
+		F.Intrinsic.String.Split(V.Local.sExcelString, "$!$", V.Local.sExcelString)
+		F.Intrinsic.Variable.PopArray(V.Local.sExcelString, V.Local.sExcelString)
+		F.Intrinsic.String.Join(V.Local.sExcelString, "$!$", V.Local.sExcelString)
+		
+		'Creating dt from excel string.
+		F.Data.DataTable.CreateFromString("dtProcessedParts", V.Local.sExcelString, "PART*!*REV*!*LOCATION*!*PL*!*DESCRIPTION*!*UM*!*SOURCE*!*BIN*!*ABC*!*PURCH_UM*!*LEAD_TIME*!*SAFETY_STOCK*!*ORDER_QTY*!*PRIMARY_VENDOR*!*REORDER_POINT*!*STD_HOURS*!*ALT_DESC_1*!*ALT_DESC_2*!*INSPECTION*!*SHIP_ON_PALLET*!*UPDATE", "String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String*!*String", "*!*", "$!$", True)
+		
+		'Adding new expresion columns
+		F.Data.DataTable.AddExpressionColumn("dtProcessedParts","FLAG_INSPECTION","String","iif(INSPECTION = 'X', 'Y', 'N')")
+		F.Data.DataTable.AddExpressionColumn("dtProcessedParts","FLAG_PALLET","String","iif(SHIP_ON_PALLET = 'X', 'Y', 'N')")
+		F.Data.DataTable.AddExpressionColumn("dtProcessedParts","SOURCE2","String","TRIM(SOURCE)")
+		
+		'Source Codes
+'		Manufacture to Stock. The part put into inventory after being manufactured. [MS] (M)
+'		Manufacture to Job. The part is added to a job after being manufactured. [MJ] (F)
+'		Purchase to Stock. The part is put into inventory after being purchased. [PS] (P)
+'		Purchase to Job. The part is added to a job after being purchased. [PJ] (J)
+'		Consign to Stock. The part is consigned to a customer but kept in stock. [CS] (C)
+'		Consign to Job. The part is consigned to a customer but used in work orders. [CJ] (G)
+
+		'Creating dict to store source codes
+		f.Data.Dictionary.Create("dictSourceCodes")
+		F.Data.Dictionary.AddItem("dictSourceCodes", "MS", "M")
+		F.Data.Dictionary.AddItem("dictSourceCodes", "MJ", "F")
+		F.Data.Dictionary.AddItem("dictSourceCodes", "PS", "P")
+		F.Data.Dictionary.AddItem("dictSourceCodes", "PJ", "J")
+		F.Data.Dictionary.AddItem("dictSourceCodes", "CS", "C")
+		F.Data.Dictionary.AddItem("dictSourceCodes", "CJ", "G")
+	
+		'Filling from dict
+		F.Data.Dictionary.SetDefaultReturn("dictSourceCodes", "")
+		f.Data.DataTable.AddColumn("dtProcessedParts", "SOURCE_CODE", "String")
+		F.Data.DataTable.FillFromDictionary("dtProcessedParts", "dictSourceCodes", "SOURCE2", "SOURCE_CODE")
+		F.Data.Dictionary.Close("dictSourceCodes")
+	
+		'Creating new dt to only get the records that must be updated
+		F.Data.DataView.Create("dtProcessedParts", "dvProcessedParts", 22, "[UPDATE] = 'X'", "")
+		F.Data.DataView.ToDataTable("dtProcessedParts", "dvProcessedParts", "dtUpdateParts", True)
+		
+	F.Intrinsic.Control.Else
+		
+		F.Intrinsic.UI.Msgbox("Excel isn't installed, cancelling process.", "ERROR")
+	
+	F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.Catch
+	
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.ProcessFile.End
+
+Program.Sub.CatchError.Start
+'To display the error
+F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}", V.Ambient.ScriptPath, V.Ambient.Newline, V.Ambient.SubroutineCalledFrom, V.Ambient.ErrorNumber, V.Ambient.ErrorDescription, V.Ambient.GABVersion, V.Global.sError) 
+F.Intrinsic.UI.Msgbox(V.Global.sError)
+F.Intrinsic.Control.CallSub("Unload")
+Program.Sub.CatchError.End
+
+Program.Sub.Unload.Start
+'Logging parts updated
+F.Intrinsic.Control.If(V.Global.sMessage, <>, "")
+	f.Intrinsic.String.Build("{0}{1} PROGRAM RUN BY: {2}", v.Global.sMessage, v.Ambient.NewLine, V.Caller.User, v.Global.sMessage)
+	F.Intrinsic.Control.CallSub("Logging")
+F.Intrinsic.Control.EndIf
+
+'Logging parts not updated if there were any
+F.Intrinsic.Control.If(V.Global.sErrorMessage, <>, "")
+	f.Intrinsic.String.Build("{0}{1} PROGRAM RUN BY: {2}", v.Global.sErrorMessage, v.Ambient.NewLine, V.Caller.User, v.Global.sErrorMessage)
+	F.Intrinsic.Control.CallSub("Logging_Error")
+F.Intrinsic.Control.EndIf
+			
+'Closes the connection if it is open
+f.Intrinsic.Control.If(v.ODBC.con.exists,=,"1") 	
+    f.ODBC.Connection!Con.Close
+f.Intrinsic.Control.EndIf
+
+'End program
+F.Intrinsic.Control.End
+Program.Sub.Unload.End
+
+Program.Sub.UpdatePart.Start
+'This subroutine updates all part numbers marked as such. 
+
+F.Intrinsic.Control.Try
+
+	V.Local.iCounter.Declare(Long)
+	V.Local.sSQL.Declare(String)
+	V.Local.sPart.Declare(String)
+	V.Local.sRev.Declare(String)
+	V.Local.sLocation.Declare(String)
+	V.Local.sMessage.Declare(String)
+	V.Local.sPL.Declare(String)
+	V.Local.sUM.Declare(String)
+	V.Local.sBin.Declare(String)
+	V.Local.sPurchUM.Declare(String)
+	V.Local.sDesc.Declare(String)
+	V.Local.sPrimaryVendor.Declare(String)
+	V.Local.sAltDesc1.Declare(String)
+	V.Local.sAltDesc2.Declare(String)
+	V.Local.sUIErrorMessage.Declare(String)
+
+	'Looping through each one of the parts that must be updated.
+	F.ODBC.Connection!Con.OpenCompanyConnection
+	F.Intrinsic.Control.For(V.Local.iCounter, 0, V.DataTable.dtUpdateParts.RowCount--, 1)
+		
+		'Setting part number, rev, location
+		V.Local.sPart.Set(V.DataTable.dtUpdateParts(V.Local.iCounter).PART!FieldValTrim)
+		V.Local.sRev.Set(V.DataTable.dtUpdateParts(V.Local.iCounter).REV!FieldValTrim)
+		F.Intrinsic.String.GSSPartString(V.Local.sPart, V.Local.sRev, V.Local.sPart)
+		V.Local.sLocation.Set(V.DataTable.dtUpdateParts(V.Local.iCounter).LOCATION!FieldValTrim)
+		
+		'Validating if part exists in GSS
+		F.Intrinsic.String.Build("select PART from V_INVENTORY_MSTR where PART = '{0}' and LOCATION = '{1}';", V.Local.sPart, V.Local.sLocation, V.Local.sSQL)
+		F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+		
+		'If part doesn't exist, write error and jump either to next part or end sub if is the only/last one
+		F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, True)
+			f.Intrinsic.String.Build("{0}{1}  -Part '{2}' with location '{3}' doesn't exist in GSS", v.Local.sUIErrorMessage, v.Ambient.NewLine, V.Local.sPart, V.Local.sLocation, v.Local.sUIErrorMessage)
+			
+			F.Intrinsic.Control.If(V.Local.iCounter, <>, V.DataTable.dtUpdateParts.RowCount--)
+				F.Intrinsic.Control.Next(V.Local.iCounter)
+			F.Intrinsic.Control.EndIf
+			
+		F.Intrinsic.Control.EndIf
+		
+		'Validating PL, UM, Bin, Purch UM.
+		
+		'PL
+		V.Local.sPL.Set(V.DataTable.dtUpdateParts(V.Local.iCounter).PL!FieldValTrim)
+		F.Intrinsic.String.Build("select PROD_LINE from V_PL_MASTER where PROD_LINE = '{0}';", V.Local.sPL, V.Local.sSQL)
+		F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+		
+		'If product line doesn't exist, write error and jump either to next part or end sub if is the only/last one
+		F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, True)
+			f.Intrinsic.String.Build("{0}{1}  -Part '{2}' with location '{4}' wasn't updated due to non-existent {3} PL", v.Local.sUIErrorMessage, v.Ambient.NewLine, V.Local.sPart, V.Local.sPL, V.Local.sLocation, v.Local.sUIErrorMessage)
+
+			F.Intrinsic.Control.If(V.Local.iCounter, <>, V.DataTable.dtUpdateParts.RowCount--)
+				F.Intrinsic.Control.Next(V.Local.iCounter)
+			F.Intrinsic.Control.EndIf			
+			
+		F.Intrinsic.Control.EndIf
+		'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+		
+		'UM
+		V.Local.sUM.Set(V.DataTable.dtUpdateParts(V.Local.iCounter).UM!FieldValTrim)
+		F.Intrinsic.String.Build("select CODE from V_UM_CODES where CODE = '{0}';", V.Local.sUM, V.Local.sSQL)
+		F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+	
+		'If UM doesn't exist, write error and jump either to next part or end sub if is the only/last one
+		F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, True)
+			f.Intrinsic.String.Build("{0}{1}  -Part '{2}' with location '{4}' wasn't updated due to non-existent {3} UM", v.Local.sUIErrorMessage, v.Ambient.NewLine, V.Local.sPart, V.Local.sUM, V.Local.sLocation, v.Local.sUIErrorMessage)
+
+			F.Intrinsic.Control.If(V.Local.iCounter, <>, V.DataTable.dtUpdateParts.RowCount--)
+				F.Intrinsic.Control.Next(V.Local.iCounter)
+			F.Intrinsic.Control.EndIf
+			
+		F.Intrinsic.Control.EndIf
+		'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+		
+		'BIN
+		V.Local.sBin.Set(V.DataTable.dtUpdateParts(V.Local.iCounter).BIN!FieldValTrim)
+		F.Intrinsic.String.Build("select BIN from V_BIN_MASTER where BIN = '{0}';", V.Local.sBin, V.Local.sSQL)
+		F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+		
+		'If Bin doesn't exist, write error and jump either to next part or end sub if is the only/last one
+		F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, True)
+			f.Intrinsic.String.Build("{0}{1}  -Part '{2}' with location '{4}' wasn't updated due to non-existent {3} Bin", v.Local.sUIErrorMessage, v.Ambient.NewLine, V.Local.sPart, V.Local.sBin, V.Local.sLocation,  v.Local.sUIErrorMessage)
+			
+			F.Intrinsic.Control.If(V.Local.iCounter, <>, V.DataTable.dtUpdateParts.RowCount--)
+				F.Intrinsic.Control.Next(V.Local.iCounter)
+			F.Intrinsic.Control.EndIf
+			
+		F.Intrinsic.Control.EndIf
+		'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+		
+		'Purch UM
+		V.Local.sPurchUM.Set(V.DataTable.dtUpdateParts(V.Local.iCounter).PURCH_UM!FieldValTrim)
+		F.Intrinsic.String.Build("select CODE from V_UM_CODES where CODE = '{0}';", V.Local.sPurchUM, V.Local.sSQL)
+		F.ODBC.Connection!Con.ExecuteAndReturn(V.Local.sSQL, V.Local.sSQL)
+	
+		'If Purch UM doesn't exist, write error and jump either to next part or end sub if is the only/last one
+		F.Intrinsic.Control.If(V.Ambient.ExecuteAndReturnEOF, =, True)
+			f.Intrinsic.String.Build("{0}{1}  -Part '{2}' with location '{4}' wasn't updated due to non-existent {3} Purch UM", v.Local.sUIErrorMessage, v.Ambient.NewLine, V.Local.sPart, V.Local.sPurchUM, V.Local.sLocation, v.Local.sUIErrorMessage)
+
+			F.Intrinsic.Control.If(V.Local.iCounter, <>, V.DataTable.dtUpdateParts.RowCount--)
+				F.Intrinsic.Control.Next(V.Local.iCounter)
+			F.Intrinsic.Control.EndIf
+			
+		F.Intrinsic.Control.EndIf
+		'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+		
+		'18 fields to update.
+			'1 PRODUCT_LINE
+			'2 DESCRIPTION
+			'3 UM_INVENTORY
+			'4 INVENTORY_MST2.CODE_SOURCE
+			'5 BIN
+			'7 CODE_ABC
+			'8 UM_PURCHASING
+			'9 TIME_MATERIAL_LEAD FLOAT!
+			'10 QTY_SAFETY FLOAT!
+			'11 QTY_ORDER FLOAT!
+			'12 INVENTORY_MST2.NAME_VENDOR
+			'13 QTY_REORDER FLOAT!
+			'14 INVENTORY_MST2.HRS_STANDARD FLOAT!
+			'15 INVENTORY_MST2.DESCRIPTION_2
+			'16 INVENTORY_MST2.DESCRIPTION_3
+			'17 INVENTORY_MST2.REQUIRES_INSP (Y/N/0/BLANK)
+			'18 INVENTORY_MST3.PALLET_FLAG (Y/N)
+
+		'Replacing single quote to avoid error during update process
+		V.Local.sDesc.Set(V.DataTable.dtUpdateParts(V.Local.iCounter).DESCRIPTION!FieldValTrim)
+		f.Intrinsic.String.Replace(V.Local.sDesc, "'", "''", V.Local.sDesc)
+		
+		'Updating fields in Inventory Master
+		F.Intrinsic.String.Build("update INVENTORY_MSTR set PRODUCT_LINE = '{1}', DESCRIPTION = '{2}', UM_INVENTORY = '{3}', BIN = '{4}', CODE_ABC = '{5}', UM_PURCHASING = '{6}', TIME_MATERIAL_LEAD = '{7}', QTY_SAFETY = '{8}', QTY_ORDER = '{9}', QTY_REORDER = '{10}' where PART = '{0}' and LOCATION = '{11}';", V.Local.sPart, V.Local.sPL, V.Local.sDesc, V.Local.sUM, V.Local.sBin, V.DataTable.dtUpdateParts(V.Local.iCounter).ABC!FieldValTrim, V.Local.sPurchUM, V.DataTable.dtUpdateParts(V.Local.iCounter).LEAD_TIME!FieldVal, V.DataTable.dtUpdateParts(V.Local.iCounter).SAFETY_STOCK!FieldVal, V.DataTable.dtUpdateParts(V.Local.iCounter).ORDER_QTY!FieldVal, V.DataTable.dtUpdateParts(V.Local.iCounter).REORDER_POINT!FieldVal, V.Local.sLocation, V.Local.sSQL)
+		F.ODBC.Connection!Con.Execute(V.Local.sSQL)
+		
+		'Replacing single quote to avoid error during update process
+		V.Local.sPrimaryVendor.Set(V.DataTable.dtUpdateParts(V.Local.iCounter).PRIMARY_VENDOR!FieldValTrim)
+		f.Intrinsic.String.Replace(V.Local.sPrimaryVendor, "'", "''", V.Local.sPrimaryVendor)
+		
+		V.Local.sAltDesc1.Set(V.DataTable.dtUpdateParts(V.Local.iCounter).ALT_DESC_1!FieldValTrim)
+		f.Intrinsic.String.Replace(V.Local.sAltDesc1, "'", "''", V.Local.sAltDesc1)
+		
+		V.Local.sAltDesc2.Set(V.DataTable.dtUpdateParts(V.Local.iCounter).ALT_DESC_2!FieldValTrim)
+		f.Intrinsic.String.Replace(V.Local.sAltDesc2, "'", "''", V.Local.sAltDesc2)
+	
+		'Updating fields in Inventory Master 2
+		F.Intrinsic.String.Build("update INVENTORY_MST2 set CODE_SOURCE = '{1}', NAME_VENDOR = '{2}', HRS_STANDARD = '{3}', DESCRIPTION_2 = '{4}', DESCRIPTION_3 = '{5}', REQUIRES_INSP = '{6}' where PART = '{0}' and LOCATION = '{7}';", V.Local.sPart, V.DataTable.dtUpdateParts(V.Local.iCounter).SOURCE_CODE!FieldValTrim, V.Local.sPrimaryVendor, V.DataTable.dtUpdateParts(V.Local.iCounter).STD_HOURS!FieldVal, V.Local.sAltDesc1, V.Local.sAltDesc2, V.DataTable.dtUpdateParts(V.Local.iCounter).FLAG_INSPECTION!FieldValTrim, V.Local.sLocation, V.Local.sSQL)
+		F.ODBC.Connection!Con.Execute(V.Local.sSQL)
+		
+		'Updating field in Inventory Master 3
+		F.Intrinsic.String.Build("update INVENTORY_MST3 set PALLET_FLAG = '{2}' where PART = '{0}' and LOCATION = '{1}';", V.Local.sPart, V.Local.sLocation, V.DataTable.dtUpdateParts(V.Local.iCounter).FLAG_PALLET!FieldValTrim, V.Local.sSQL)
+		F.ODBC.Connection!Con.Execute(V.Local.sSQL)
+		
+		'Logging part number successfully updated
+		F.Intrinsic.String.Build("{0}{1}  -Part '{2}' with location '{3}' was successfully updated.", V.Local.sMessage, V.Ambient.NewLine, V.Local.sPart, V.Local.sLocation, V.Local.sMessage)
+
+	F.Intrinsic.Control.Next(V.Local.iCounter)
+	F.ODBC.Connection!Con.Close
+	
+	V.Global.sMessage.Set(V.Local.sMessage)
+	
+	'Displaying msg if all flaged parts were updated
+	F.Intrinsic.Control.If(v.Local.sUIErrorMessage, =, "")
+		f.Intrinsic.UI.Msgbox("All flagged parts were successfully updated.", "Success")
+	F.Intrinsic.Control.Else
+		V.Global.sErrorMessage.Set(V.Local.sUIErrorMessage)
+		f.Intrinsic.UI.Msgbox(V.Local.sUIErrorMessage, "Parts Not Updated")
+	F.Intrinsic.Control.EndIf
+		
+F.Intrinsic.Control.Catch
+	
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.UpdatePart.End
+
+Program.Sub.Logging.Start
+'This subroutine creates a log file to store the part numbers that were updated. 
+
+F.Intrinsic.Control.Try
+
+	V.Local.sPath.Declare(String)
+	V.Local.sFile.Declare(String)
+	V.Local.bExists.Declare(Boolean)
+	V.Local.bExists2.Declare(Boolean)
+	'V.Local.sMessage.Declare(String)
+	V.Local.sContents.Declare(String)
+	
+	'V.Local.sMessage.Set(V.Args.Message)
+	
+	'Checking if log folder exists
+	F.Intrinsic.String.Build("{0}\CUSTOM\6898\LOG", V.Caller.GlobalDir, V.Local.sPath)
+	F.Intrinsic.File.DirExists(V.Local.sPath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists.Not)
+		
+		F.Intrinsic.File.CreateDir(V.Local.sPath)
+	
+	F.Intrinsic.Control.EndIf
+	
+	'Checking if log file exists
+	F.Intrinsic.String.Build("{0}\6898 Log.txt", V.Local.sPath, V.Local.sFile)
+	
+	F.Intrinsic.File.Exists(V.Local.sFile, V.Local.bExists2)
+	F.Intrinsic.Control.If(V.Local.bExists2.Not)
+		
+		F.Intrinsic.String.Build("{0} {1}: Log Start", V.Ambient.Date.FormatYYYY-MM-DD, V.Ambient.Time.Format!HH:NN:SS, V.Local.sContents)
+		F.Intrinsic.File.String2File(V.Local.sFile, V.Local.sContents)
+		
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.String.Build("{0} {1}: {2}", V.Ambient.Date.FormatYYYY-MM-DD, V.Ambient.Time.Format!HH:NN:SS, V.Global.sMessage, V.Local.sContents)
+	F.Intrinsic.File.Append2FileNewLine(V.Local.sFile, V.Local.sContents)
+	
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.Logging.End
+
+Program.Sub.Logging_Error.Start
+'This subroutine creates a log file to store part numbers not updated due to XYZ.
+
+F.Intrinsic.Control.Try
+
+	V.Local.sPath.Declare(String)
+	V.Local.sFile.Declare(String)
+	V.Local.bExists.Declare(Boolean)
+	V.Local.bExists2.Declare(Boolean)
+	'V.Local.sMessage.Declare(String)
+	V.Local.sContents.Declare(String)
+	
+	'V.Local.sMessage.Set(V.Args.Message)
+	
+	'Checking if log folder exists
+	F.Intrinsic.String.Build("{0}\CUSTOM\6898\LOG", V.Caller.GlobalDir, V.Local.sPath)
+	F.Intrinsic.File.DirExists(V.Local.sPath, V.Local.bExists)
+	F.Intrinsic.Control.If(V.Local.bExists.Not)
+		
+		F.Intrinsic.File.CreateDir(V.Local.sPath)
+	
+	F.Intrinsic.Control.EndIf
+	
+	'Checking if log file exists
+	F.Intrinsic.String.Build("{0}\6898 Error Log.txt", V.Local.sPath, V.Local.sFile)
+	
+	F.Intrinsic.File.Exists(V.Local.sFile, V.Local.bExists2)
+	F.Intrinsic.Control.If(V.Local.bExists2.Not)
+		
+		F.Intrinsic.String.Build("{0} {1}: Log Start", V.Ambient.Date.FormatYYYY-MM-DD, V.Ambient.Time.Format!HH:NN:SS, V.Local.sContents)
+		F.Intrinsic.File.String2File(V.Local.sFile, V.Local.sContents)
+		
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.String.Build("{0} {1}: {2}", V.Ambient.Date.FormatYYYY-MM-DD, V.Ambient.Time.Format!HH:NN:SS, V.Global.sErrorMessage, V.Local.sContents)
+	F.Intrinsic.File.Append2FileNewLine(V.Local.sFile, V.Local.sContents)
+	
+F.Intrinsic.Control.Catch
+
+	F.Intrinsic.Control.CallSub(CatchError)
+	
+F.Intrinsic.Control.EndTry
+Program.Sub.Logging_Error.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8223.27623$}$1
+${$6$}$apadilla$}$20220929152732119$}$Lag9STqBJOmNXSbd5+msRcBWPGz0aFqSzPePUG9qWbw1CebfVRip2yby1VQeHo68EPBRc8UgqP6m1IjcZBfRTQ==
+Program.Sub.Comments.End
